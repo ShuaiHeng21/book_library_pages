@@ -1,8 +1,8 @@
 import {BookScanner} from './scanner.js';
 import {canonicalISBN,lookupISBN} from './isbn.js';
-import {AUTH_API_URL} from './config.js';
+import {AUTH_API_URL} from './config.js?v=20261021-connection';
 import {REPOSITORY,reconcile} from './github.js';
-import {SyncService,backendOrigin} from './sync-client.js';
+import {SyncService,backendOrigin,checkConnection} from './sync-client.js?v=20261021-connection';
 import {KEY,normalizeBook,parseBackup,mergeBooks,makeCSV} from './model.js';
 const $=s=>document.querySelector(s);let books=[],editingId=null,cover='',pendingImport=[],toastTimer,storageBroken=false,syncBusy=false,syncBase=[],syncTimer,auth=null,apiURL='';
 const names={all:'全部藏书',在读:'正在阅读',未读:'待读清单',已读:'已经读完',暂停:'暂时搁置',弃读:'不再继续'};
@@ -44,7 +44,7 @@ window.addEventListener('storage',e=>{if(e.key===KEY){try{const data=e.newValue?
 const SESSION_KEY='shuye.github-session.v1',API_KEY='shuye.github-api.v1',FLOW_KEY='shuye.github-flow.v1';
 function setSyncStatus(message){$('#sync-status').textContent=message;$('#sync-label').textContent=message;}
 function saveAuth(value){auth=value;if(value)sessionStorage.setItem(SESSION_KEY,JSON.stringify(value));else sessionStorage.removeItem(SESSION_KEY);updateSyncUI();}
-function updateSyncUI(){$('#github-login').hidden=!!auth;$('#github-login').disabled=!apiURL;$('#sync-now').hidden=!auth;$('#github-logout').hidden=!auth;$('#backend-url').value=apiURL;$('#backend-settings').hidden=!!auth;}
+function updateSyncUI(){$('#github-login').hidden=!!auth;$('#github-login').disabled=!apiURL;$('#sync-now').hidden=!auth;$('#github-logout').hidden=!auth;$('#backend-url').value=apiURL;$('#backend-settings').hidden=!!auth;$('#sync-endpoint').textContent=apiURL?'当前后端：'+apiURL:'尚未配置后端';}
 function service(){return new SyncService(apiURL,auth.token);}
 function bytesToken(){return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');}
 $('#sync-open').onclick=()=>{updateSyncUI();$('#sync-dialog').showModal();};
@@ -52,6 +52,7 @@ $('#save-backend').onclick=()=>{try{apiURL=backendOrigin($('#backend-url').value
 $('#github-login').onclick=()=>{try{if(!apiURL)throw Error('请先配置授权后端地址');const flow=bytesToken();sessionStorage.setItem(FLOW_KEY,flow);const url=new URL(apiURL+'/auth/start');url.search=new URLSearchParams({return_to:location.origin+location.pathname,flow}).toString();location.assign(url.href);}catch(e){toast(e.message);}};
 $('#github-logout').onclick=()=>{if(syncBusy){toast('正在同步，请稍候再退出');return;}saveAuth(null);clearTimeout(syncTimer);setSyncStatus('已退出 GitHub · 本地书库保留');};
 $('#sync-now').onclick=()=>syncLibrary();
+$('#check-connection').onclick=async()=>{const button=$('#check-connection');button.disabled=true;$('#connection-result').textContent='正在检查后端和跨域 API…';try{if(!apiURL)throw Error('请先设置后端地址');const result=await checkConnection(apiURL);$('#connection-result').textContent='连接正常：健康检查 HTTP '+result.health+'；跨域接口已正确拒绝测试会话（HTTP '+result.cors+'）。'+(auth?'请点击立即同步重试。':'请点击使用 GitHub 登录。');}catch(error){$('#connection-result').textContent=error.message;}finally{button.disabled=false;}};
 async function chooseConflicts(conflicts){const list=$('#conflict-list');list.replaceChildren();conflicts.forEach((conflict,index)=>{const box=el('section','conflict-card');box.append(el('strong','',conflict.local?.title||conflict.remote?.title||conflict.base.title));['local','remote'].forEach(side=>{const label=el('label','radio-row'),input=el('input');input.type='radio';input.name='conflict-'+index;input.value=side;const value=conflict[side],text=el('span');text.append(el('strong','',side==='local'?'本设备版本':'GitHub 云端版本'),el('small','',value?`${value.title} · ${value.status} · ${value.progress}%`:'已删除此书'));if(value){const details=el('details');details.append(el('summary','','查看完整信息'),el('pre','',JSON.stringify({...value,cover:value.cover?'[已保存封面]':''},null,2)));text.append(details);}label.append(input,text);box.append(label);});list.append(box);});
  return new Promise(resolve=>{const dialog=$('#conflicts-dialog');const onClose=()=>{dialog.removeEventListener('close',onClose);resolve(null);};dialog.addEventListener('close',onClose);$('#resolve-conflicts').onclick=()=>{const resolutions=Object.create(null);for(let i=0;i<conflicts.length;i++){const checked=document.querySelector('[name="conflict-'+i+'"]:checked');if(!checked){toast('请为每本冲突书籍选择一个版本');return;}resolutions[conflicts[i].id]=checked.value;}dialog.removeEventListener('close',onClose);dialog.close();resolve(resolutions);};dialog.showModal();});
 }
@@ -67,9 +68,9 @@ async function syncLibrary(){if(!auth||syncBusy)return;if(storageBroken){toast('
  setSyncStatus('GitHub 已同步 · '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
  }catch(e){if(e.status===401)saveAuth(null);setSyncStatus('同步未完成 · '+e.message);toast(e.message);}finally{syncBusy=false;$('#sync-now').disabled=false;}
 }
-async function initializeSync(){try{apiURL=localStorage.getItem(API_KEY)||AUTH_API_URL;if(apiURL)apiURL=backendOrigin(apiURL);const fragment=new URLSearchParams(location.hash.slice(1));if(fragment.has('shuye_session')){const token=fragment.get('shuye_session'),flow=fragment.get('flow'),expected=sessionStorage.getItem(FLOW_KEY);history.replaceState(null,'',location.pathname+location.search);sessionStorage.removeItem(FLOW_KEY);if(!expected||flow!==expected)throw Error('登录返回验证失败，请重新点击 GitHub 登录');saveAuth({token});}
+async function initializeSync(){try{apiURL=localStorage.getItem(API_KEY)||AUTH_API_URL;if(apiURL==='https://shuai-lib.workers.dev'){apiURL=AUTH_API_URL;localStorage.setItem(API_KEY,apiURL);}if(apiURL)apiURL=backendOrigin(apiURL);const fragment=new URLSearchParams(location.hash.slice(1));if(fragment.has('shuye_session')){const token=fragment.get('shuye_session'),flow=fragment.get('flow'),expected=sessionStorage.getItem(FLOW_KEY);history.replaceState(null,'',location.pathname+location.search);sessionStorage.removeItem(FLOW_KEY);if(!expected||flow!==expected)throw Object.assign(Error('登录返回验证失败，请重新点击 GitHub 登录'),{code:'invalid_login_callback'});saveAuth({token});}
  if(!auth){const stored=sessionStorage.getItem(SESSION_KEY);if(stored)auth=JSON.parse(stored);}updateSyncUI();if(!apiURL){setSyncStatus('GitHub 同步 · 待配置后端');return;}if(auth){const info=await service().info();setSyncStatus('已登录 '+info.login+' · 准备同步');await syncLibrary();}else setSyncStatus('GitHub 同步 · 尚未登录');
- }catch(e){try{saveAuth(null);}catch{auth=null;}setSyncStatus('GitHub 同步 · '+e.message);updateSyncUI();}}
+ }catch(e){if(e.status===401||e.code==='invalid_login_callback'||e instanceof SyntaxError){try{saveAuth(null);}catch{auth=null;}}setSyncStatus('GitHub 同步 · '+e.message);updateSyncUI();}}
 window.addEventListener('online',()=>{if(auth)syncLibrary();});initializeSync();
 
 let scanResult=null,lookupController=null,scanOperation=0;
