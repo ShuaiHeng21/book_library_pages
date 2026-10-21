@@ -5,6 +5,7 @@ export function normalizeBook(raw){
   if(!raw||typeof raw!=='object'||Array.isArray(raw)||typeof raw.title!=='string'||!raw.title.trim())throw new Error('每本书都必须有有效的书名');
   const book={};
   for(const field of fields){if(raw[field]!=null&&typeof raw[field]!=='string')throw new Error('书籍字段格式不正确');book[field]=(raw[field]||'').trim();if(book[field].length>(field==='notes'?10000:field==='tags'?300:field==='isbn'?40:200))throw new Error('书籍字段内容过长');}
+  for(const field of ['source','sourceUrl','fetchedAt']){if(raw[field]!=null&&typeof raw[field]!=='string')throw new Error('书目来源字段格式不正确');if(raw[field]){if(raw[field].length>1000)throw new Error('书目来源字段过长');book[field]=raw[field];}}
   book.id=typeof raw.id==='string'&&raw.id.length<=100&&raw.id?raw.id:crypto.randomUUID();
   book.status=raw.status??'未读';if(!STATUSES.includes(book.status))throw new Error('阅读状态不正确');
   book.progress=raw.progress??0;if(typeof book.progress!=='number'||!Number.isInteger(book.progress)||book.progress<0||book.progress>100)throw new Error('阅读进度必须是 0–100 的整数');

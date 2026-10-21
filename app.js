@@ -1,8 +1,8 @@
 import {BookScanner} from './scanner.js';
-import {canonicalISBN,lookupISBN} from './isbn.js';
-import {AUTH_API_URL} from './config.js?v=20261021-connection';
+import {canonicalISBN,lookupISBN,lookupSources} from './isbn.js?v=20261021-catalog';
+import {AUTH_API_URL} from './config.js?v=20261021-catalog';
 import {REPOSITORY,reconcile} from './github.js';
-import {SyncService,backendOrigin,checkConnection} from './sync-client.js?v=20261021-connection';
+import {SyncService,backendOrigin,checkConnection} from './sync-client.js?v=20261021-catalog';
 import {KEY,normalizeBook,parseBackup,mergeBooks,makeCSV} from './model.js';
 const $=s=>document.querySelector(s);let books=[],editingId=null,cover='',pendingImport=[],toastTimer,storageBroken=false,syncBusy=false,syncBase=[],syncTimer,auth=null,apiURL='';
 const names={all:'全部藏书',在读:'正在阅读',未读:'待读清单',已读:'已经读完',暂停:'暂时搁置',弃读:'不再继续'};
@@ -24,7 +24,7 @@ function card(book){const node=el('button','book-card');node.type='button';node.
 function selectStatus(status){$('#status-filter').value=status;render();}
 document.querySelectorAll('[data-status]').forEach(n=>n.onclick=()=>selectStatus(n.dataset.status));document.querySelectorAll('[data-stat]').forEach(n=>n.onclick=()=>selectStatus(n.dataset.stat));$('#status-filter').onchange=render;$('#sort').onchange=render;$('#search').oninput=render;$('#reset-filters').onclick=()=>{$('#search').value='';selectStatus('all');};$('#view-toggle').onclick=()=>{const list=$('#books').classList.toggle('list');$('#view-toggle').textContent=list?'▦':'☷';$('#view-toggle').setAttribute('aria-label',list?'切换网格视图':'切换列表视图');$('#view-toggle').title=list?'切换网格视图':'切换列表视图';};
 function updateCover(){const preview=$('#cover-preview');preview.replaceChildren();if(cover){const img=el('img');img.src=cover;img.alt='书籍封面预览';preview.append(img);}else{const span=el('span','','＋');span.append(el('small','','上传封面'));preview.append(span);}$('#remove-cover').hidden=!cover;}
-function openEditor(book){if(syncBusy){toast('正在同步，请稍候再编辑');return;}if(storageBroken){toast('原始数据读取失败，请先在备份与迁移中导出原始数据，再导入备份恢复。');return;}editingId=book?.id||null;cover=book?.cover||'';const form=$('#book-form');form.reset();for(const name of ['title','author','isbn','publisher','location','tags','notes','status','progress'])form.elements[name].value=book?.[name]??(name==='status'?'未读':name==='progress'?0:'');$('#editor-title').textContent=book?'书籍详情 / 编辑':'添加一本书';$('#delete-book').hidden=!editingId;$('#cover-input').value='';updateCover();$('#editor').showModal();}
+function openEditor(book){if(syncBusy){toast('正在同步，请稍候再编辑');return;}if(storageBroken){toast('原始数据读取失败，请先在备份与迁移中导出原始数据，再导入备份恢复。');return;}editingId=book?.id||null;cover=book?.cover||'';const form=$('#book-form');form.reset();for(const name of ['title','author','isbn','publisher','location','tags','notes','status','progress','source','sourceUrl','fetchedAt'])form.elements[name].value=book?.[name]??(name==='status'?'未读':name==='progress'?0:'');$('#editor-title').textContent=book?'书籍详情 / 编辑':'添加一本书';$('#book-source-note').hidden=!book?.source;$('#book-source-note').textContent=book?.source?'书目信息来源：'+book.source+'；请核对版本。':'';$('#delete-book').hidden=!editingId;$('#cover-input').value='';updateCover();$('#editor').showModal();}
 $('#add-book').onclick=()=>openEditor();$('#empty-add').onclick=()=>openEditor();document.querySelectorAll('[data-close]').forEach(n=>n.onclick=()=>$('#'+n.dataset.close).close());document.querySelectorAll('dialog').forEach(d=>d.addEventListener('click',e=>{if(e.target===d){const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)d.close();}}));
 $('#book-form').elements.status.onchange=e=>{if(e.target.value==='已读')$('#book-form').elements.progress.value=100;};
 let coverBusy=false;
@@ -73,11 +73,11 @@ async function initializeSync(){try{apiURL=localStorage.getItem(API_KEY)||AUTH_A
  }catch(e){if(e.status===401||e.code==='invalid_login_callback'||e instanceof SyntaxError){try{saveAuth(null);}catch{auth=null;}}setSyncStatus('GitHub 同步 · '+e.message);updateSyncUI();}}
 window.addEventListener('online',()=>{if(auth)syncLibrary();});initializeSync();
 
-let scanResult=null,lookupController=null,scanOperation=0;
+let scanResult=null,lookupController=null,scanOperation=0,catalogBooks=[];
 const scanStatus=message=>{$('#scan-status').textContent=message;};
 const scanner=new BookScanner($('#scan-video'),isbn=>{$('#scan-isbn').value=isbn;queryScannedBook();},scanStatus);
 function cancelScanWork(){scanOperation++;lookupController?.abort();lookupController=null;scanner.stop();$('#lookup-isbn').disabled=false;}
-function resetScanResult(){scanResult=null;$('#scan-result').hidden=true;$('#use-scan').hidden=true;$('#manual-scan').hidden=true;$('#scan-duplicate').hidden=true;}
+function resetScanResult(){scanResult=null;catalogBooks=[];$('#catalog-status').textContent='';$('#catalog-links').replaceChildren();$('#catalog-choice-label').hidden=true;$('#scan-result').hidden=true;$('#use-scan').hidden=true;$('#manual-scan').hidden=true;$('#scan-duplicate').hidden=true;}
 $('#scan-book').onclick=()=>{if(syncBusy||storageBroken){toast('请先完成同步或恢复本地数据，再添加书籍');return;}cancelScanWork();resetScanResult();$('#scan-isbn').value='';$('#scan-photo').value='';scanStatus('正在准备摄像头；也可拍照或输入 ISBN。');$('#scan-dialog').showModal();scanner.start();};
 $('#scan-dialog').addEventListener('close',cancelScanWork);
 $('#start-camera').onclick=()=>{cancelScanWork();resetScanResult();scanner.start();};
@@ -88,10 +88,20 @@ $('#scan-gallery').onchange=$('#scan-photo').onchange=async e=>{const file=e.tar
 $('#scan-isbn').oninput=()=>{cancelScanWork();resetScanResult();scanStatus('输入 ISBN 后点击查询书籍。');};
 $('#isbn-form').onsubmit=e=>{e.preventDefault();queryScannedBook();};
 async function queryScannedBook(){cancelScanWork();resetScanResult();const isbn=canonicalISBN($('#scan-isbn').value);if(!isbn){scanStatus('ISBN 格式或校验位不正确，请检查条形码下方的数字。');return;}$('#scan-isbn').value=isbn;const duplicate=books.find(book=>canonicalISBN(book.isbn)===isbn);if(duplicate){$('#scan-duplicate').textContent='书库中已有《'+duplicate.title+'》，请确认是否需要再添加一本。';$('#scan-duplicate').hidden=false;}
- const operation=scanOperation,controller=new AbortController();lookupController=controller;const timeout=setTimeout(()=>controller.abort(),12000);$('#lookup-isbn').disabled=true;$('#manual-scan').hidden=false;scanStatus('已识别 ISBN '+isbn+'，正在查询 Open Library…');
- try{const found=await lookupISBN(isbn,{signal:controller.signal});if(operation!==scanOperation||!$('#scan-dialog').open)return;if(!found){scanStatus('数据库暂未收录这本书。ISBN 已保留，请手动补充书名等信息。');return;}scanResult=found;const details=$('#scan-details');details.replaceChildren();for(const [label,value] of [['书名',found.title],['作者',found.author||'未收录'],['出版社',found.publisher||'未收录'],['ISBN',isbn]])details.append(el('dt','',label),el('dd','',value));$('#scan-result').hidden=false;$('#use-scan').hidden=false;scanStatus('已找到书籍，请核对后继续录入。');
+ const operation=scanOperation,controller=new AbortController();lookupController=controller;const timeout=setTimeout(()=>controller.abort(),20000);$('#lookup-isbn').disabled=true;$('#manual-scan').hidden=false;scanStatus('已识别 ISBN '+isbn+'，正在查询书目来源…');
+ try{let data;if(apiURL){data=await lookupSources(isbn,{backend:apiURL,source:$('#catalog-source').value,session:auth?.token,signal:controller.signal});}else{const found=await lookupISBN(isbn,{signal:controller.signal});data={results:found?[{...found,source:'Open Library',sourceUrl:'https://openlibrary.org/isbn/'+isbn,fetchedAt:new Date().toISOString()}]:[],providers:[{name:'Open Library',status:found?'found':'empty'}],links:[]};}
+ if(operation!==scanOperation||!$('#scan-dialog').open)return;
+ const states={found:'已找到',empty:'未收录',unavailable:'暂不可用',not_configured:'待配置',login_required:'请先登录'};
+ $('#catalog-status').textContent=data.providers.map(p=>p.name+'：'+(states[p.status]||p.status)+(p.detail?'（'+p.detail+'）':'')).join('；');
+ for(const link of data.links||[]){try{const url=new URL(link.url);if(url.protocol!=='https:'||!['book.douban.com','books.google.com'].includes(url.hostname))continue;const a=el('a','', '打开'+link.name+'核对 ↗');a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';$('#catalog-links').append(a);}catch{}}
+ catalogBooks=data.results;const choices=$('#catalog-choice');choices.replaceChildren(...catalogBooks.map((book,i)=>{const option=el('option','',book.source+' · '+book.title);option.value=String(i);return option;}));$('#catalog-choice-label').hidden=catalogBooks.length<2;
+ if(!catalogBooks.length){const unavailable=data.providers.some(p=>['unavailable','not_configured','login_required'].includes(p.status));scanStatus(unavailable?'本次未获得书目信息，部分来源不可用。可切换来源、打开豆瓣核对，或保留 ISBN 手动补充。':'所选来源没有收录此 ISBN，可切换来源或手动补充。');return;}
+ showCatalogBook(0);
  }catch(error){if(operation===scanOperation)scanStatus(error.name==='AbortError'?'查询超时，请检查网络后重试，或保留 ISBN 手动补充。':'暂时无法查询数据库，请检查网络后重试，或保留 ISBN 手动补充。');}finally{clearTimeout(timeout);if(operation===scanOperation){$('#lookup-isbn').disabled=false;lookupController=null;}}
 }
+function showCatalogBook(index){const found=catalogBooks[index];if(!found)return;scanResult=found;const details=$('#scan-details');details.replaceChildren();for(const [label,value] of [['书名',found.title],['作者',found.author||'未收录'],['出版社',found.publisher||'未收录'],['ISBN',found.isbn],['来源',found.source]])details.append(el('dt','',label),el('dd','',value));$('#catalog-attribution').textContent='信息来源：'+found.source+'。请核对版本；下一步可修改、上传封面并选择阅读状态。';$('#scan-result').hidden=false;$('#use-scan').hidden=false;scanStatus('已找到 '+catalogBooks.length+' 条来源结果，请核对后继续录入。');}
+$('#catalog-choice').onchange=()=>showCatalogBook(Number($('#catalog-choice').value));
+$('#catalog-source').onchange=()=>{cancelScanWork();resetScanResult();scanStatus('已切换来源，点击查询书籍重新查询。');};
 function continueScannedBook(useResult){if(syncBusy||storageBroken){toast('请先完成同步或恢复数据，再添加书籍');return;}const isbn=canonicalISBN($('#scan-isbn').value);if(!isbn){scanStatus('请先输入有效 ISBN');return;}const draft=useResult&&scanResult?{...scanResult}:{isbn};$('#scan-dialog').close();openEditor(draft);$('#editor-title').textContent='确认并添加书籍';}
 $('#use-scan').onclick=()=>continueScannedBook(true);$('#manual-scan').onclick=()=>continueScannedBook(false);
 document.addEventListener('visibilitychange',()=>{if(document.hidden){scanner.stop();if($('#scan-dialog').open)scanStatus('摄像头已暂停，返回后可点击开启摄像头继续。');}});window.addEventListener('pagehide',()=>scanner.stop());
