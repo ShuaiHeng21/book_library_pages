@@ -3,7 +3,7 @@ import {canonicalISBN,lookupISBN,lookupSources} from './isbn.js?v=20261021-catal
 import {AUTH_API_URL} from './config.js?v=20261021-catalog';
 import {REPOSITORY,reconcile} from './github.js';
 import {SyncService,backendOrigin,checkConnection} from './sync-client.js?v=20261021-catalog';
-import {KEY,normalizeBook,parseBackup,mergeBooks,makeCSV} from './model.js';
+import {KEY,normalizeBook,parseBackup,mergeBooks,makeCSV} from './model.js?v=20261021-catalog';
 const $=s=>document.querySelector(s);let books=[],editingId=null,cover='',pendingImport=[],toastTimer,storageBroken=false,syncBusy=false,syncBase=[],syncTimer,auth=null,apiURL='';
 const names={all:'全部藏书',在读:'正在阅读',未读:'待读清单',已读:'已经读完',暂停:'暂时搁置',弃读:'不再继续'};
 function toast(message){$('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),4500);}
