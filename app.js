@@ -1,4 +1,4 @@
-import {BookScanner} from './scanner.js';
+import {BookScanner} from './scanner.js?v=20261022-camera';
 import {canonicalISBN,lookupISBN,lookupSources} from './isbn.js?v=20261021-catalog';
 import {AUTH_API_URL} from './config.js?v=20261021-catalog';
 import {REPOSITORY,reconcile} from './github.js';
